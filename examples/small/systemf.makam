@@ -58,13 +58,59 @@ typeof (unpack E F) T' <-
    typeof y (TF x) ->
    typeof (F x y) T').
 
+tuple : list term -> term.
+prod : list typ -> typ.
+
+typeof (tuple ES) (prod TS) <-
+  map typeof ES TS.
+
+mygetunif : A -> B -> prop.
+
+%extend change.
+getunif : A -> B -> prop.
+
+getunif_aux, getunif_ : int -> list B -> A -> list B -> prop.
+
+getunif_aux L X Y Z <- demand.case_otherwise (getunif_ L X Y Z) (generic.fold (getunif_aux L) X Y Z).
+getunif_ L Cur X (X :: Cur) when refl.isunif X, refl.unifmetalevel X L.
+getunif_ L Cur X Cur when refl.isunif X.
+
+getunif Root Unif' <- refl.unifmetalevel Unif L, getunif_aux L [] Root Unif, unique (eqT refl.sameunif) Unif Unif'.
+
+
+%end.
+
+(*
+mygetunif Where Found when (refl.decomposeunif Found Level _, getunif Where Found', refl.decomposeunif Found' Level _) <-
+  eq Found Found'.
+*)
+mygetunif Where Found <- change.getunif Where Found.
+
+
 gentypeof : term -> typ -> prop.
-gentype : typ -> typ -> prop.
+gentype : typ -> list typ -> typ -> prop.
 gentypeof E T' <-
   typeof E T,
-  gentype T T'.
-gentype T T <- not(getunif T (T' : typ)).
-gentype T (pi TF') <-
-  getunif T (T' : typ),
-  absunif T (T' : typ) TF,
-  (x:typ -> gentype (TF x) (TF' x)).
+  change.getunif T US,
+  gentype T US T'.
+gentype T [] T.
+gentype T (cons U US) (pi TF') <-
+  refl.userdef.absunif T U TF,
+  (x:typ -> gentype (TF x) US (TF' x)).
+
+let : term -> (term -> term) -> term.
+
+typeof (let E E') T' <-
+  gentypeof E T,
+  (x:term -> typeof x T -> typeof (E' x) T').
+
+%trace+ gentype.
+%trace+ mygetunif.
+%trace+ change.getunif.
+%trace+ change.getunif_.
+%trace+ change.getunif_aux.
+%trace+ refl.userdef.absunif.
+
+typeof (lam (fun z => lam (fun x => let x (fun y => tuple [y, y])))) T ?
+typeof (let (lam (fun x => x)) (fun id => id)) T ?
+typeof (let (lam (fun f => (lam (fun g => lam (fun x => app f (app g x)))))) (fun compose => compose)) T ?
