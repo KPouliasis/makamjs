@@ -1,0 +1,165 @@
+(* This is an experiment, for an 'extensible' way to do different 'visiting'/'transformation' phases
+   on ABTs, where we keep the same ABT through phases, but 'extend' it with extra information (like
+   typing). We could also have different constructors that are only valid in particular phases,
+   e.g. add polymorphic constructs that are only usable at the 'elaboration' (and later) stages,
+   which keep a relationship with the original terms that generated them.
+
+   This is quite clunky for the time being, and I don't think we can make it tell a good story yet.
+   The situation could be improved somewhat with some generic predicates, but I don't think we can
+   go very far.
+*)   
+
+record : type -> type.
+
+%extend record.
+
+nil : record unit.
+cons : A -> record B -> record (A * B).
+
+idx : type -> type -> type.
+hd : idx (A * B) A.
+tl : idx B A -> idx (C * B) A.
+
+get : record A -> idx A B -> B -> prop.
+get (cons HD _) hd HD.
+get (cons _ TL) (tl IDX) RES :- get TL IDX RES.
+
+from_tuple_aux : list dyn -> record B -> prop.
+from_tuple_aux nil nil.
+from_tuple_aux (cons (dyn HD) TL) (cons HD TL') :- from_tuple_aux TL TL'.
+
+from_tuple : A -> record B -> prop.
+from_tuple X R :-
+  tuple.dynlist X L,
+  from_tuple_aux L R.
+
+%end.
+
+constr : type -> type.
+var : type -> type.
+
+varinfo : type -> type.
+varinfo : record (string * A) -> varinfo A.
+
+term : type -> type.
+term : constr A -> record A -> term A.
+
+lam : varinfo A -> (var A -> term A) -> constr A.
+app : term A -> term A -> constr A.
+var : var A -> constr A.
+let : term A -> varinfo A -> (var A -> term A) -> constr A.
+natconst : int -> constr A.
+boolconst : bool -> constr A.
+natle : term A -> term A -> constr A.
+ifthenelse : term A -> term A -> term A -> constr A.
+
+typ : type.
+tarrow : typ -> typ -> typ.
+tnat : typ.
+tbool : typ.
+
+transform : type -> type -> type.
+
+extend_term : term A -> term (B * A) -> prop.
+extend_constr : constr A -> constr (B * A) -> prop.
+extend_varinfo : varinfo A -> varinfo (B * A) -> prop.
+extend_var : var A -> var (B * A) -> prop.
+
+extend_term (term T INFO) (term T' (record.cons HD INFO)) :-
+  extend_constr T T'.
+extend_varinfo (varinfo (record.cons NAME REST)) (varinfo (record.cons NAME (record.cons TYP REST))).
+
+extend_constr (lam V F) (lam V' F') :-
+  extend_varinfo V V', (x:(var A) -> x':(var (B * A)) -> extend_var x x' -> extend_term (F x) (F' x')).
+extend_constr (app E1 E2) (app E1' E2') :-
+  extend_term E1 E1', extend_term E2 E2'.
+extend_constr (var X) (var X') :- extend_var X X'.
+extend_constr (let E V F) (let E' V' F') :-
+  extend_term E E', extend_varinfo V V', (x:(var A) -> x':(var (B * A)) -> extend_var x x' -> extend_term (F x) (F' x')).
+extend_constr (natconst N) (natconst N).
+extend_constr (boolconst B) (boolconst B).
+extend_constr (natle E1 E2) (natle E1' E2') :-
+  extend_term E1 E1', extend_term E2 E2'.
+extend_constr (ifthenelse E1 E2 E3) (ifthenelse E1' E2' E3') :-
+  extend_term E1 E1', extend_term E2 E2', extend_term E3 E3'.
+
+
+info_of_var : var A -> varinfo A -> prop.
+
+get_info_of_term : term A -> X -> prop.
+get_info_of_rcrd : record A -> X -> prop.
+get_info_of_var : var A -> X -> prop.
+
+get_info_of_term (term _ Record) X :- record.get Record _ X.
+get_info_of_rcrd Record X :- record.get Record _ X.
+get_info_of_var X Y :-
+  info_of_var X (varinfo Record), record.get Record _ Y.
+
+open : varinfo A -> (var A -> term A) -> (var A -> term A -> prop) -> prop.
+open VINFO F P :-
+ (x:(var A) -> info_of_var x VINFO -> 
+   ([Body] eq (F x) Body, P x Body )).
+
+
+transformer : type -> type -> type.
+visitor : type -> type -> type.
+
+simple_transformer : visitor A B -> transformer A B.
+
+transform : transformer A B -> term A -> term B -> prop.
+visit : visitor A B -> term B -> prop.
+
+transform (simple_transformer VISITOR) E E' :-
+  extend_term E E',
+  visit VISITOR E'.
+
+typing : visitor unit (typ * unit).
+
+visit typing (term (lam VT F) INFO) :-
+  open VT F (pfun v f =>
+    get_info_of_var v (DomT : typ),
+    get_info_of_term f (RngT : typ),
+    get_info_of_rcrd INFO (tarrow DomT RngT),
+    visit typing f).
+
+visit typing (term (app E1 E2) INFO) :-
+  get_info_of_term E1 (tarrow T1 T2),
+  get_info_of_term E2 T1,
+  get_info_of_rcrd INFO T2,
+  visit typing E1,
+  visit typing E2.
+
+visit typing (term (var X) INFO) :-
+  get_info_of_var X (T : typ),
+  get_info_of_rcrd INFO T.
+
+visit typing (term (let E VT F) INFO) :-
+  get_info_of_rcrd INFO (T' : typ),
+  get_info_of_term E (T : typ),
+  visit typing E,
+  open VT F (pfun v body =>
+    get_info_of_var v T,
+    get_info_of_term body T',
+    visit typing body).
+
+visit typing (term (natconst N) INFO) :-
+  get_info_of_rcrd INFO tnat.
+
+visit typing (term (boolconst B) INFO) :-
+  get_info_of_rcrd INFO tbool.
+
+visit typing (term (natle E1 E2) INFO) :-
+  get_info_of_rcrd INFO tbool,
+  get_info_of_term E1 tnat,
+  get_info_of_term E2 tnat,
+  visit typing E1,
+  visit typing E2.
+
+visit typing (term (ifthenelse E1 E2 E3) INFO) :-
+  get_info_of_rcrd INFO (T' : typ),
+  get_info_of_term E1 tbool,
+  get_info_of_term E2 T',
+  get_info_of_term E3 T',
+  visit typing E1,
+  visit typing E2,
+  visit typing E3.
