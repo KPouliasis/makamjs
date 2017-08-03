@@ -46,6 +46,7 @@ MAKAMFILES=$(foreach file, $(shell find . -name \*.makam), --file $(file):/$(fil
 .PHONY: js md2makam md2makam-watch
 
 js:
+	echo $(MAKAMFILES)
 	$(OCAMLBUILD) -plugin-tag "package(js_of_ocaml.ocamlbuild)" -no-links js/browser.byte
 	js_of_ocaml -I ./ $(MAKAMFILES) --noruntime +js_of_ocaml/runtime.js +weak.js +toplevel.js js/myruntime.js _build/js/browser.byte -o js/makam.js
 
