@@ -7,7 +7,7 @@ let enabled : bool ref = ref false ;;
 let pausedtimeelapsed = ref 0.0 ;;
 
 let time =
-  fun () -> (Mtime.to_ns (Mtime.elapsed ()) *. 1e-9) -. !pausedtimeelapsed
+  fun () -> (Mtime.Span.to_ns (Mtime_clock.elapsed ()) *. 1e-9) -. !pausedtimeelapsed
 ;;
   
 let starttime () = time () ;;
