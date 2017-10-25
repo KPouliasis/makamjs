@@ -15,6 +15,23 @@ let meta_print_exception : (exn -> unit) ref =
   ref (fun e -> print_now "Uncaught OCaml-level exception; use bytecode Makam toplevel to debug.\n")
 ;;
 
+let jseval s =
+  Js.to_string (Js.Unsafe.eval_string s)
+;;
+
+builtin_enter_module "js" ;;
+
+  new_builtin_predicate "eval" ( _tString **> _tString **> _tProp )
+    (let open RunCtx.Monad in
+     fun _ -> function [ script ; output ] -> begin perform
+         script <-- chasePattcanon [] script ;
+         script <-- _PtoString script ;
+         pattcanonUnifyFull output (_PofString (jseval script) ~loc:output.loc)
+    end | _ -> assert false)
+  ;;
+
+builtin_leave_module () ;;
+
 exception ParsingError;;
 
 let _ =
@@ -110,8 +127,8 @@ let main () =
 
 let js_process_input s =
   let output = ref "" in
-  Sys_js.set_channel_flusher Pervasives.stdout (fun s -> output := (!output) ^ s) ;
-  Sys_js.set_channel_flusher Pervasives.stderr (fun s -> output := (!output) ^ s) ;
+  (* Sys_js.set_channel_flusher Pervasives.stdout (fun s -> output := (!output) ^ s) ; *)
+  (* Sys_js.set_channel_flusher Pervasives.stderr (fun s -> output := (!output) ^ s) ; *)
   process_input (Js.to_string s);
   Js.string !output
 ;;

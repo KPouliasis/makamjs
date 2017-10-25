@@ -635,26 +635,3 @@ let global_staged_command cmdcode =
                     doStagedCommand cmdcode)
 
 ;;
-
-
-let jseval s =
-  let (inp, outp) = Unix.open_process "node" in
-  BatInnerIO.nwrite outp s;
-  BatInnerIO.close_out outp;
-  let res = BatInnerIO.read_all inp in
-  BatInnerIO.close_in inp;
-  res
-;;
-
-builtin_enter_module "js" ;;
-
-  new_builtin_predicate "eval" ( _tString **> _tString **> _tProp )
-    (let open RunCtx.Monad in
-     fun _ -> function [ script ; output ] -> begin perform
-         script <-- chasePattcanon [] script ;
-         script <-- _PtoString script ;
-         pattcanonUnifyFull output (_PofString (jseval script) ~loc:output.loc)
-    end | _ -> assert false)
-  ;;
-
-builtin_leave_module () ;;
