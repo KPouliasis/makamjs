@@ -125,12 +125,16 @@ let main () =
 ;;
 
 
-let js_process_input s =
+let js_process_input_batch s =
   let output = ref "" in
-  (* Sys_js.set_channel_flusher Pervasives.stdout (fun s -> output := (!output) ^ s) ; *)
-  (* Sys_js.set_channel_flusher Pervasives.stderr (fun s -> output := (!output) ^ s) ; *)
+  Sys_js.set_channel_flusher Pervasives.stdout (fun s -> output := (!output) ^ s) ;
+  Sys_js.set_channel_flusher Pervasives.stderr (fun s -> output := (!output) ^ s) ;
   process_input (Js.to_string s);
   Js.string !output
+;;
+
+let js_process_input_interactive s =
+  process_input (Js.to_string s)
 ;;
 
 let define_as_worker () =
@@ -145,12 +149,13 @@ let define_as_worker () =
 
 let define_as_global () =
   Js.Unsafe.set Js.Unsafe.global "makam" 
-    (Js.wrap_callback js_process_input)
+    (Js.wrap_callback js_process_input_batch)
 ;;
 
 let define_as_export () =
   Js.Unsafe.set (Js.Unsafe.variable "module") "exports" 
-    (Js.wrap_callback js_process_input)
+    (Js.Unsafe.obj [| ("eval", Js.Unsafe.inject (Js.wrap_callback js_process_input_interactive));
+                      ("version", Js.Unsafe.inject (Js.string version)) |])
 ;;
 
 let _ = 
