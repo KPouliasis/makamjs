@@ -23,11 +23,9 @@ cons : reified A -> reified_args B C -> reified_args (A -> B) C.
 unifvar : int -> reified_args A B -> B -> reified B.
 term : A -> reified_args A B -> reified B.
 const : A -> reified A.
-bvar : A -> reified_args A B -> reified B.
-rbvar : reified A -> reified A.
+bvar : reified A -> reified A.
 nvar : A -> reified_args A B -> reified B.
-lambda : (A -> reified B) -> reified (A -> B).
-rlambda : (reified A -> reified B) -> reified (A -> B).
+lambda : (A -> reified A -> reified B) -> reified (A -> B).
 
 %end.
 
@@ -37,9 +35,16 @@ isbvar : [A]A -> prop.
 
 reify : [A]A -> reified A -> prop.
 reify_args : [A B]args A B -> reified_args A B -> prop.
+reify_var : [A]A -> reified A -> prop.
+
+emptysubst : list dyn -> list dyn -> prop.
+emptysubst [] [].
+emptysubst (dyn (HD : A) :: TL) (dyn (HD' : A) :: TL') :- emptysubst TL TL'.
 
 reify X (reified.unifvar I SubstR X) when refl.isunif(X) :-
-  refl.decomposeunif X I SubstDyn, dyn.to_args SubstDyn Subst, reify_args Subst SubstR.
+  refl.decomposeunif X I SubstDyn,
+  dyn.to_args SubstDyn Subst,
+  reify_args Subst SubstR.
 
 reify X (reified.term Head ArgsR)
     when refl.headargs X Head ArgsDyn, refl.isbaseterm X, 
@@ -49,63 +54,9 @@ reify X (reified.term Head ArgsR)
 reify X (reified.const X) when refl.isconst X.
 
 reify (X : A -> B) (reified.lambda X_R) :-
-  (x:A -> refl.isbvar x -> reify (X x) (X_R x)).
+  (x:A -> y:(reified A) -> refl.isbvar x -> reify_var x y -> reify (X x) (X_R x y)).
 
-reify (X : A -> B) (reified.rlambda X_R) :-
-  (x:A -> y:(reified A) -> refl.isbvar x -> reify x (reified.rbvar y) -> reify (X x) (X_R y)).
-
-(*
-reify_lambdas : [A Body]A -> (reified Body -> reified A) -> ((list dyn -> prop) -> prop) -> prop.
-reify_lambdas (X : A) (fun (body: reified A) => body) (pfun k => k []) when not(dyn.eq X (Z : A -> B)).
-reify_lambdas (X : Arg -> Something)
-              (fun (body: reified Body) => reified.lambda (fun (a: Arg) => X_R a body))
-              (pfun vars_k => (z:Arg -> refl.isbvar z -> ResultK z (pfun vars => vars_k (z :: vars)))) :-
-  (z:Arg -> refl.isbvar z ->
-    reify_lambdas (X z)
-                  (fun (body: reified Body) => X_R z body)
-                  (ResultK z)).
-
-dadada : [A B]A -> list dyn -> B -> list dyn -> prop.
-dadada X [] Head Args when refl.headargs X Head Args.
-dadada (X : A -> B) (dyn HD :: TL) Head Args :- dadada (X HD) TL Head Args.
-
-reify (X : A -> B) (reified.lambda X_R) :-
-  print "tatu!\n",
-  (x:A -> reify_lambdas (X x) Lam K),
-  K (pfun vars => [Args ArgsR ArgsDyn](x:A -> ([Rest]
-    print (X x), 
-    dadada (X x) vars (Head x) ArgsDyn,
-    print "lala",
-    print (Head x), print ArgsDyn,
-    print "eq",
-    eq (Head x) x,
-    print "still here",
-    dyn.to_args ArgsDyn Args,
-    print "args:", print Args,
-    reify_args Args ArgsR,
-    print "argsR:", print ArgsR,
-    debugfull(print (Lam (reified.bvar x ArgsR))),
-    eq (X_R x) (Lam (reified.bvar x ArgsR))))).
-*)
-
-(*
-reify X Z :-
-  print "lala",
-  refl.headargs X Head ArgsDyn,
-  refl.isbvar Head,
-  print "lalu",
-  print Head, print ArgsDyn,
-  dyn.to_args ArgsDyn Args,
-  reify_args Args ArgsR,
-  print "lale",
-  print ArgsR,
-  print "eq",
-  eq Z (reified.bvar Head ArgsR),
-  print "done eq".
-*)
-
-reify X (reified.bvar Head ArgsR) when refl.headargs X Head ArgsDyn, refl.isbvar Head :-
-  dyn.to_args ArgsDyn Args, reify_args Args ArgsR.
+reify X (reified.bvar Y) when not(refl.isunif X), reify_var X Y.
 
 reify X (reified.nvar Head ArgsR) when refl.headargs X Head ArgsDyn, not(refl.isbvar Head), refl.isnvar Head :-
   dyn.to_args ArgsDyn Args, reify_args Args ArgsR.
@@ -124,17 +75,11 @@ reflect (reified.term Head ArgsR) Z :-
 
 reflect (reified.const Const) Const.
 
-reflect (reified.bvar Head ArgsR) Z :-
-  reflect ArgsR Args, dyn.from_args Args ArgsDyn, refl.headargs Z Head ArgsDyn.
-
 reflect (reified.nvar Head ArgsR) Z :-
   reflect ArgsR Args, dyn.from_args Args ArgsDyn, refl.headargs Z Head ArgsDyn.
 
 reflect (reified.lambda X_R) X :-
-  (x:A -> reflect (X_R x) (X x)).
-
-reflect (reified.rlambda X_R) X :-
-  (x:A -> y:(reified A) -> reflect (reified.rbvar y) x -> reflect (X_R y) (X x)).
+  (x:A -> y:(reified A) -> reflect (reified.bvar y) x -> reflect (X_R x y) (X x)).
 
 reflect [] [].
 reflect (HD_R :: TL_R) (HD :: TL) :- reflect HD_R HD, reflect TL_R TL.
@@ -155,13 +100,16 @@ app : term -> term -> term.
 lam : (term -> term) -> term.
 freevar : string -> term.
 
+reify : [A]A -> reified A -> prop.
+reify X Y :- once(.reify X Y).
+
 testcase reify :- reify "lala" (reified.const "lala").
 testcase reify :- reify unit (reified.term unit []).
 testcase reify :- reify (app unit unit) (reified.term app [reified.term unit [], reified.term unit []]).
-testcase reify :- reify (fun (x: term) => "a") (reified.lambda (fun (x: term) => reified.const "a")).
-testcase reify :- reify (fun (x: term) => x) (reified.lambda (fun (x: term) => reified.bvar x [])).
+testcase reify :- reify (fun (x: term) => "a") (reified.lambda (fun _ x => reified.const "a")).
+testcase reify :- reify (fun (x: term) => x) (reified.lambda (fun _ x => reified.bvar x)).
 testcase reify :- (z:term -> reify z (reified.nvar z [])).
-testcase reify :- reify app (reified.lambda (fun a => reified.lambda (fun b => reified.term app [reified.bvar a [], reified.bvar b []]))).
+testcase reify :- reify app (reified.lambda (fun _ a => reified.lambda (fun _ b => reified.term app [reified.bvar a, reified.bvar b]))).
 
 (*
 %debug+. %debugfull+.
@@ -176,10 +124,10 @@ testcase reify :-
   eq Reified (fun z =>
              (reified.term app [
               reified.term lam [
-                reified.lambda (fun x =>
+                reified.lambda (fun xw x =>
                   reified.term app [
-                    reified.unifvar Index1 [] _,
-                    reified.unifvar Index2 [reified.bvar x []] _
+                    reified.unifvar Index1 [] E1,
+                    reified.unifvar Index2 [reified.bvar x] (E2 xw)
                   ]
                 )
               ],
@@ -204,10 +152,10 @@ testcase reify :-
   eq Reified (fun z =>
              (reified.term app [
               reified.term lam [
-                reified.lambda (fun x =>
+                reified.lambda (fun xw x =>
                   reified.term app [
                     reified.unifvar _ [] E1,
-                    reified.unifvar _ [reified.bvar x []] (E2 x)
+                    reified.unifvar _ [reified.bvar x] (E2 xw)
                   ]
                 )
               ],
