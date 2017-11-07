@@ -1,0 +1,156 @@
+reified : type -> type.
+
+args : type -> type -> type.
+nil : args A A.
+cons : A -> args B C -> args (A -> B) C.
+
+%extend dyn.
+to_args : [A B] list dyn -> args A B -> prop.
+to_args [] [].
+to_args (dyn HD :: TL) (HD :: TL') :- to_args TL TL'.
+
+from_args : [A B] args A B -> list dyn -> prop.
+from_args [] [].
+from_args (HD :: TL) (dyn HD :: TL') :- from_args TL TL'.
+%end.
+
+reified_args : type -> type -> type.
+nil : reified_args A A.
+cons : reified A -> reified_args B C -> reified_args (A -> B) C.
+
+%extend reified.
+
+unifvar : int -> reified_args A B -> B -> reified B.
+term : A -> reified_args A B -> reified B.
+const : A -> reified A.
+bvar : A -> reified_args A B -> reified B.
+nvar : A -> reified_args A B -> reified B.
+lambda : (A -> reified B) -> reified (A -> B).
+
+%end.
+
+%extend refl.
+isbvar : [A]A -> prop.
+%end.
+
+reify : [A]A -> reified A -> prop.
+reify_args : [A B]args A B -> reified_args A B -> prop.
+
+reify X (reified.unifvar I SubstR X) when refl.isunif(X) :-
+  refl.decomposeunif X I SubstDyn, dyn.to_args SubstDyn Subst, reify_args Subst SubstR.
+
+reify X (reified.term Head ArgsR)
+    when refl.headargs X Head ArgsDyn, refl.isbaseterm X, 
+         not(refl.isbvar Head), not(refl.isnvar Head) :-
+  dyn.to_args ArgsDyn Args, reify_args Args ArgsR.
+
+reify X (reified.const X) when refl.isconst X.
+
+reify (X : A -> B) (reified.lambda X_R) :-
+  (x:A -> refl.isbvar x -> reify (X x) (X_R x)).
+
+reify X (reified.bvar Head ArgsR) when refl.headargs X Head ArgsDyn, refl.isbvar Head :-
+  dyn.to_args ArgsDyn Args, reify_args Args ArgsR.
+
+reify X (reified.nvar Head ArgsR) when refl.headargs X Head ArgsDyn, not(refl.isbvar Head), refl.isnvar Head :-
+  dyn.to_args ArgsDyn Args, reify_args Args ArgsR.
+
+reify_args [] [].
+reify_args (HD :: TL) (HD_R :: TL_R) :- reify HD HD_R, reify_args TL TL_R.
+
+reflect : [A]reified A -> A -> prop.
+reflect : [A B]reified_args A B -> args A B -> prop.
+
+reflect (reified.unifvar I SubstR X) Z :-
+  reflect SubstR Subst, dyn.from_args Subst SubstDyn, refl.recomposeunif X SubstDyn Z.
+
+reflect (reified.term Head ArgsR) Z :-
+  reflect ArgsR Args, dyn.from_args Args ArgsDyn, refl.headargs Z Head ArgsDyn.
+
+reflect (reified.const Const) Const.
+
+reflect (reified.bvar Head ArgsR) Z :-
+  reflect ArgsR Args, dyn.from_args Args ArgsDyn, refl.headargs Z Head ArgsDyn.
+
+reflect (reified.nvar Head ArgsR) Z :-
+  reflect ArgsR Args, dyn.from_args Args ArgsDyn, refl.headargs Z Head ArgsDyn.
+
+reflect (reified.lambda X_R) X :-
+  (x:A -> reflect (X_R x) (X x)).
+
+reflect [] [].
+reflect (HD_R :: TL_R) (HD :: TL) :- reflect HD_R HD, reflect TL_R TL.
+
+eq_nounif : [A]A -> A -> prop.
+eq_nounif A B :- reify A Areified, reify B Breified, eq Areified Breified.
+
+%trace+ reify.
+
+
+%extend tests.
+
+reify : testsuite.
+
+term : type.
+app : term -> term -> term.
+lam : (term -> term) -> term.
+freevar : string -> term.
+
+testcase reify :-
+  eq Term (fun z => app (lam (fun x => app E1 (E2 x))) (app z (freevar "test"))),
+  eq Reified (fun z =>
+             (reified.term app [
+              reified.term lam [
+                reified.lambda (fun x =>
+                  reified.term app [
+                    reified.unifvar Index1 [] _,
+                    reified.unifvar Index2 [reified.bvar x []] _
+                  ]
+                )
+              ],
+              reified.term app [
+                reified.nvar z [],
+                reified.term freevar [reified.const "test"]
+              ]
+            ])),
+  (z:term -> (reify (Term z) (R z),
+              eq (R z) (Reified z),
+              not(eq Index1 Index2),
+              reflect (R z) (Term' z),
+              eq_nounif (Term z) (Term' z),
+              reify (Term' z) (R' z),
+              print_string "------------------------------ here on !!\n",
+              reify (R z) (RR z),
+              print_string "------------------------------ did we get here\n",
+              print RR,
+              success (* eq_nounif (R z) (R' z) *) )).
+
+testcase reify :-
+  eq Term (fun z => app (lam (fun x => app E1 (E2 x))) (app z (freevar "test"))),
+  eq Reified (fun z =>
+             (reified.term app [
+              reified.term lam [
+                reified.lambda (fun x =>
+                  reified.term app [
+                    reified.unifvar _ [] E1,
+                    reified.unifvar _ [reified.bvar x []] (E2 x)
+                  ]
+                )
+              ],
+              reified.term app [
+                reified.nvar z [],
+                reified.term freevar [reified.const "test"]
+              ]
+            ])),
+  (z:term -> (reflect (Reified z) (T z),
+              eq_nounif (T z) (Term z),
+              reify (T z) (Reified' z),
+              eq (Reified' z) (Reified z))).
+
+%end.
+
+run_tests X ?
+
+%trace- reify.
+(w:string -> (reify (fun (z: string) => w) (X w), reify (X w) (Z w))) ?
+
