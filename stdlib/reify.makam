@@ -95,7 +95,7 @@ eq_nounif : [A]A -> A -> prop.
 (* TODO: something (other than the bvar situation) is introducing multiple cases into reify, figure it out. *)
 eq_nounif A B :- once(reify A Areified), once(reify B Breified), eq Areified Breified.
 
-%extend tests.
+%extend stdlib_tests.
 
 reify : testsuite.
 
@@ -227,11 +227,9 @@ unif_alpha_eqv : [A]A -> A -> prop.
 unif_alpha_eqv X Y :- once(reify X XR), once(reify Y YR), eqv XR YR.
 
 
-%extend tests.
+%extend stdlib_tests.
 testcase reify :- unif_alpha_eqv (X: string) (Y: string).
 testcase reify :- not(unif_alpha_eqv (dyn (X: string)) (dyn (Y: int))).
 testcase reify :- unif_alpha_eqv (lam X) (lam Y).
 testcase reify :- not(unif_alpha_eqv (app X Y) (app W W)).
 %end.
-
-run_tests X ?
