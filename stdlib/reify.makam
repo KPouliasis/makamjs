@@ -37,10 +37,6 @@ reify : [A]A -> reified A -> prop.
 reify_args : [A B]args A B -> reified_args A B -> prop.
 reify_var : [A]A -> reified A -> prop.
 
-emptysubst : list dyn -> list dyn -> prop.
-emptysubst [] [].
-emptysubst (dyn (HD : A) :: TL) (dyn (HD' : A) :: TL') :- emptysubst TL TL'.
-
 reify X (reified.unifvar I SubstR X) when refl.isunif(X) :-
   refl.decomposeunif X I SubstDyn,
   dyn.to_args SubstDyn Subst,
