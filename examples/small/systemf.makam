@@ -22,7 +22,8 @@ typeof (app E1 E2) T2 <-
   typeof E2 T1 .
 
 typeof (lam (fun x => app x eunit)) T ?
-
+>> Yes:
+>> T := arrow (arrow tunit T') T'.
 
 intconst : int -> term.
 tint  : typ.

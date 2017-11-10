@@ -52,3 +52,6 @@ run_tests Suites <-
   [ "\n\n=== RUNNING TESTS (test suites: ", SuitesStr, ")\n" ] Str,
   print_string Str,
   once(demand.aux_demand (testing_private.run_test Suites [] []) (testcase X)).
+
+
+query_result : testsuite.

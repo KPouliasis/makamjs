@@ -41,7 +41,7 @@ let autospan_fold f a xs =
     List.fold_left (fun cur elm -> autospan_bin f cur elm) a xs
 ;;
 let mkTm v ls =
-    let span = 
+    let span =
       match ls with
         hd :: _ -> hd.span
       | [] -> None
@@ -54,11 +54,19 @@ let mkLamO ?(loc = None) (s,t) = mkLamO ~loc:loc s t ;;
 
 let makam_toplevel_parser : (syntax_type -> (unit -> unit) list Peg.parser_t) ref = ref (fun _ _ _ _ -> None) ;;
 let last_command_span : UChannel.span ref = ref None ;;
+let last_query : (unit -> exprU) located option ref = ref None ;;
 
 let _KEYWORDS = StringSet.of_list [ "if"; "then"; "else"; "when"; "type"; "fun"; "pfun" ];;
 
 exception Forget of string ;;
 
+let query_test premises =
+  let premise =
+    Utils.ExtList.foldnonempty (fun q1 q2 -> mkTm "and" [ q1 ; q2 ]) (mkTm "success" [])
+    (fun x -> x) premises
+  in
+  mkTm "clause" [ mkTm "testcase" [ mkTm "query_result" [] ]; premise ]
+;;
 >>
 
 (* term language *)
@@ -86,7 +94,7 @@ lexpr -> fn:ltoken("fun") bindings:repplusWHITE(binding) token("=>") body:lexpr
       / e:appexpr^ << e >>
 
 appexpr -> f:baseexpr^ args:repWHITE(baseexpr)
-        << List.fold_left (autospan_bin mkApp) f args >> 
+        << List.fold_left (autospan_bin mkApp) f args >>
 
 namepref -> "^n" / "ⁿ" ;
 
@@ -113,12 +121,12 @@ baseexpr -> id:ltoken(qualident)   << autospan_un mkVar id >>
                (fun cur elm -> mkTm "tuple" [ elm ; cur ])
                hd
                tl >>
-          
+
           / i:ltoken(num)                       << autospan_un mkInt i >>
           / token("{prop|") p:prop token("|}")  << p >>
           / token("{dbt|") d:dbt token("|}")    << d >>
           / e:lparenthesized(annotexpr)         << e >>
-          / e:lparenthesized(lexpr^)             << e >> 
+          / e:lparenthesized(lexpr^)             << e >>
 
 identnamed -> x:ident^ namepref nmeta:identany << toVarWithNamedMeta x nmeta >>
             / x:identany << x >>
@@ -126,12 +134,12 @@ identany   -> x:ident^ << x >> / "_" x:ident << "_" ^ x >> / "_" << "_" >>
 qualident  -> ms:repplus( (x:ident^ "." &ident^) ) x:ident^ << let prefix = String.join "." ms in prefix ^ "." ^ x >>
             / "." x:ident^ << "." ^ x >>
 
-annotexpr -> e:lexpr^ token(":") t:lmonotyp << autospan_bin mkAnnot e t >> 
+annotexpr -> e:lexpr^ token(":") t:lmonotyp << autospan_bin mkAnnot e t >>
 
 typ  -> t:ltyp << t.content >>
 
 ltyp  -> s:ltoken("[") adhoc:repWHITE(token(ident)) e:ltoken("]") t:lmonotyp
-        << let adhoc = { content = adhoc ; span = s ---> e } in 
+        << let adhoc = { content = adhoc ; span = s ---> e } in
            autospan_bin _tForallAdhoc adhoc t >>
       / t:lmonotyp << t >>
 
@@ -164,7 +172,7 @@ binding -> token("(") ids:repWHITE(ltoken(identnamed)) token(":") t:lmonotyp tok
 clause   -> goal:lexpr^ token("when") cond:prop token("<-") premise:prop
              << mkTm "whenclause" [ goal ; cond ; premise ] >>
           / goal:lexpr^ token("when") cond:prop token(":-") premise:prop
-             << mkTm "whenclause" [ goal ; cond ; premise ] >>             
+             << mkTm "whenclause" [ goal ; cond ; premise ] >>
           / goal:lexpr^ token("when") cond:prop endspan:loced(epsilon)
              << mkTm "whenclause" [ goal ; cond ; mkTmConst endspan "success" ] >>
           / goal:lexpr^ x:token("<-") premise:prop
@@ -192,7 +200,7 @@ hyp      -> token("if") ifh:hyp1 token("then") thenh:hyp1 token("else") elseh:hy
             << mkTm "ifte" [ ifh ; thenh ; elseh ] >>
           / h:hyp1 << h >>
 
-hyp1     -> token("(") newvars:repWHITE(newvar) 
+hyp1     -> token("(") newvars:repWHITE(newvar)
             knowns:rep( (x:assumption token("->") << x >>) )
             &&( epsilon << fun _ -> List.length newvars + List.length knowns > 0 >> )
             req:hyp token(")")
@@ -227,9 +235,13 @@ def       -> ids:repplusSEP(token(ident^), ",")  token(":") t:typ
 (*
 prologcmd -> d:def tokenW(".") << fun () -> List.iter (uncurry global_define) ds >>
            / c:clause tokenW(".") << fun () -> Termlangprolog.global_new_clause c.content >>
-           / p:hyp tokenW("?") << fun () -> Termlangprolog.global_query p.content >>
+           / p:hyp tokenW("?") << last_query := Some p; fun () -> Termlangprolog.global_query p.content >>
+           / &&( epsilon << let query = !last_query in
+                            fun _ -> Option.is_some query >> )
+             t:querytest
+             << let query = Option.get !last_query in
+                fun () -> Termlangprolog.global_new_clause (t query).content >>
            / token("%") d:directive tokenW(".") << d () >>
-           / o:ocamlrevquote  << fun () -> !(Termlangprolog.meta_do) o >>
            / repplusV(white)^ << fun () -> () >>
 *)
 
@@ -243,7 +255,7 @@ prologcmd1 -> (* c:consumeBM << fun () -> () >> / *)
            / c:clauseBM token(".") << fun () -> if !_ONLY_TYPECHECK then
                                                  (Benchmark.cumulative "total clauses"
                                                    (lazy(global_typecheck_silent c.content)))
-                                                else 
+                                                else
                                                  (Benchmark.cumulative "total clauses"
                                                    (lazy(Termlangprolog.global_new_clause c.content))) >>
            / token("`(") p:hyp token(")") token(".")
@@ -252,14 +264,25 @@ prologcmd1 -> (* c:consumeBM << fun () -> () >> / *)
                           else
                              (Benchmark.cumulative "total staged commands"
                                 (lazy(Termlangrefl.global_staged_command p.content))) >>
-           / p:hyp token("?") << fun () -> if !_ONLY_TYPECHECK then
+           / p:hyp token("?") << last_query := Some p;
+                                 fun () -> (if !_ONLY_TYPECHECK then
                                              (Benchmark.cumulative "total queries"
                                                (lazy(global_typecheck_silent p.content)))
                                            else
                                              (Benchmark.cumulative "total queries"
-                                              (lazy(Termlangprolog.global_query p.content))) >>
+                                              (lazy(Termlangprolog.global_query p.content)))) >>
+           / &&( epsilon << let query = !last_query in
+                            fun _ -> Option.is_some query >> )
+             t:querytest
+             << let query = Option.get !last_query in
+                fun () -> if !_ONLY_TYPECHECK then
+                           (Benchmark.cumulative "total clauses"
+                             (lazy(global_typecheck_silent (t query).content)))
+                         else
+                           (Benchmark.cumulative "total clauses"
+                             (lazy(Termlangprolog.global_new_clause (t query).content)))
+                         >>
            / token("%") d:directive token(".") << fun () -> d () >>
-           / o:ocamlrevquote  << fun () -> !(Termlangprolog.meta_do) o >>
            / repplusV(white)^ << fun () -> () >>
 
 prologcmd  -> c:loced(prologcmd1)
@@ -269,11 +292,13 @@ prologcmd  -> c:loced(prologcmd1)
                  Benchmark.cumulative "total" (lazy(p ())) >>
 
 prologcmdvoid ->
-             d:defBM token(".") << fun () -> () >> 
+             d:defBM token(".") << fun () -> () >>
            / c:clauseBM token(".") << fun () -> () >>
-           / p:hyp token("?") << fun () -> () >>
+           / p:hyp token("?") << last_query := Some p; fun () -> () >>
+           /   &&( epsilon << let query = !last_query in
+                              fun _ -> Option.is_some query >> )
+             t:querytest    << fun () -> () >>
            / token("%") d:directive token(".") << fun () -> () >>
-           / o:ocamlrevquote  << fun () -> () >>
            / repplusV(white)^ << fun () -> () >>
 
 
@@ -299,7 +324,7 @@ directive -> "use" repplus(white) s:token(ident_or_str)
            << fun () -> Termlangcanon.global_add_directory s >>
            / "typenorm" repplus(white) e:baseexpr
            << fun () -> global_typecheck_and_normalize (e.content) >>
-           / "type" repplus(white) e:baseexpr 
+           / "type" repplus(white) e:baseexpr
            << fun () -> global_typecheck (e.content) >>
            / "reset"
            << fun () -> global_reset () >>
@@ -335,8 +360,24 @@ literate_line -> "```makam\n" c:rep(literate_cmd) repV(white) at_start("```\n") 
                / !"```makam\n" to_EOL << [] >>
 literate_cmd -> c:cmdflushed repV(white) << c >>
               / ">>" to_EOL << fun () -> () >>
-at_start(p) -> &&( epsilon << fun _ -> (UChannel.loc _input).charno == 1 >> )
+at_start(p) -> &&( epsilon << fun _ -> let open UChannel in (print_string (string_of_int ((loc _input).charno)); (loc _input).charno == 1) >> )
                c:p << c >>
+
+
+(* -------------------------------------- *)
+(* Query Result Tests                     *)
+(* -------------------------------------- *)
+
+quoteline(p) -> to_EOL ">> " res:p << res >>
+
+(* TODO: fix spans *)
+querytest -> quoteline("Yes.") << fun query -> query_test [ query ] >>
+           / quoteline("Impossible.") << fun query -> query_test [ mkTm "not" [ query ] ] >>
+           / quoteline("Yes:") results:repplus(quoteline(var_assignment))
+              << fun query -> query_test (query :: results) >>
+
+(* TODO: lexpr should not allow line breaks (or there should be a terminating character *)
+var_assignment -> x:ltoken(ident) token(":=") e:lexpr token(("," / ".")) << mkTm "unif_alpha_eqv" [ autospan_un mkVar x; e ] >>
 
 (* -------------------------------------- *)
 (* Dynamic binding trees parsing          *)
@@ -368,7 +409,7 @@ dbt_top -> var:ltoken(ident)^ "." d:dbt_top
          / h:dbt_head^ seq:dbt_seq << h seq >>
          / b:dbt_elm << b >>
 dbt_seq  -> es:repWHITE(dbt_elm)
-            << List.fold_left 
+            << List.fold_left
                              (fun cur elm -> mkTm "cons" [ elm ; cur ])
                              (mkTm "nil" []) (List.rev es) >>
 dbt_head -> var:ltoken(ident)^ << fun l -> mkTm "dbt_constr" [ autospan_un mkVar var ; l ] >>
@@ -427,12 +468,12 @@ tident       -> m:ident^ "." &ident^ x:tident << m ^ "." ^ x >>
 
 (* string characters must include the escape characters allowed by ocaml, so that bootstrapping works properly *)
 hexdigitchar ->  a:[0123456789abcdefABCDEF]  << a >>
-escapechar -> 
+escapechar ->
      s:[\\] c:[\\"'ntbr]
-           << ([ s; c ] |> UString.implode) |> UString.to_string >> 
+           << ([ s; c ] |> UString.implode) |> UString.to_string >>
    / s:[\\] n1:digitchar n2:digitchar n3:digitchar
            << ([ s; n1; n2; n3 ] |> UString.implode) |> UString.to_string >>
-   / s:[\\] x:[x] n1:hexdigitchar n2:hexdigitchar n3:hexdigitchar 
+   / s:[\\] x:[x] n1:hexdigitchar n2:hexdigitchar n3:hexdigitchar
            << ([ s; x; n1; n2; n3 ] |> UString.implode) |> UString.to_string >>
 strchar ->  s:escapechar << Utils.unescape s >>
          / !"\"" c:. << ([ c ] |> UString.implode) |> UString.to_string >>
@@ -441,8 +482,6 @@ str     -> token(["]) str:rep(strchar) ["] << str |> String.concat "" >>
 
 ocamlrevchar  -> !"<<" c:. << c >>
 ocamlrevtext  -> cs:repplus(ocamlrevchar) << (cs |> UString.implode) |> UString.to_string >>
-ocamlrevquote -> token(">>") ocamltext:ocamlrevtext token("<<") 
-                << ocamltext >>
 
 
 (* -------------------------------------- *)
@@ -455,16 +494,16 @@ rep(p) ->  l:fastrep(p) << l >> ;
 repV(p) -> fastrepV(p) ;
 repplus(p) ->  hd:p tl:rep(p) << hd :: tl >>
 repplusV(p) ->  p repV(p) ;
-repplusSEP(p, sep) -> 
+repplusSEP(p, sep) ->
           hd:p tl:rep( ( token(sep) repV(white) x:p << x >> ) )  << hd :: tl >>
 repSEP(p, sep) -> l:repplusSEP(p, sep) << l >>
                 / epsilon << [] >>
 
-repWHITE(p) -> 
+repWHITE(p) ->
           hd:p tl:rep( ( repplusV(white) x:p << x >> ) ) repV(white) << hd :: tl >>
         / repV(white) << [] >>
 
-repplusWHITE(p) -> 
+repplusWHITE(p) ->
           hd:p tl:rep( ( repplusV(white) x:p << x >> ) ) repV(white) << hd :: tl >>
 
 
@@ -477,11 +516,13 @@ makam_toplevel_parser :=
   (fun syntax memocells resetmemo input ->
    let oldmemo = !_memotable in
    let oldlr   = LRHash.copy _lrinfo in
+   last_query := None;
    let res     =
      match syntax with
        `Makam -> parse_toplevel memocells resetmemo input
      | `Markdown -> parse_literate memocells resetmemo input
    in
+   last_query := None;
    _memotable := oldmemo ;
    LRHash.clear _lrinfo ;
    LRHash.iter (fun k v -> LRHash.add _lrinfo k v) oldlr ;
