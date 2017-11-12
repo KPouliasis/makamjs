@@ -1,6 +1,9 @@
 %use utils.
 %use extutils.
 
+systemf : testsuite.
+%testsuite systemf.
+
 term : type.
 typ  : type.
 

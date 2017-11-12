@@ -85,6 +85,7 @@ let _DEBUG       = ref false ;;
 let _DEBUG_TYPES = ref false ;;
 let _DEBUG_NAMES = ref false ;;
 
+type 'a located = { content : 'a ; span : UChannel.span } ;;
 
 type ctxEnv = { name_to_bvar : (int list) Dict.t ;
                 bvars        : int ;
@@ -119,13 +120,15 @@ type ctxState = { name_to_fvar : (int list) Dict.t ;
                   treesize_of_tmeta : int IMap.t ;
                   tmeta_is_poly   : bool IMap.t;
                   current_module : string option ;
+                  current_testsuite : string option ;
                   qualified_fvar_exists : StringSet.t ;
                   qualified_tfvar_exists : StringSet.t ;
                   globally_loaded_modules : StringSet.t ;
                   modules_loaded_in_modules : StringSet.t Dict.t ;
                   module_extension_stack : string option list ;
                   included_directories : string list ;
-                  current_directory : string
+                  current_directory : string ;
+                  last_query : (unit -> exprU) located option
                 } ;;
 
 let empty_env () = 
@@ -144,9 +147,11 @@ let empty_state () =
     tmetanames = [] ; name_to_tmeta = Dict.empty ;
     tmeta_to_name = IMap.empty ; named_tmetas = 0 ;
     polytmetas = 0 ; tmeta_to_polytmeta = IMap.empty ;
-    current_module = None ; qualified_fvar_exists = StringSet.empty ; qualified_tfvar_exists = StringSet.empty ;
+    current_module = None ; current_testsuite = None;
+    qualified_fvar_exists = StringSet.empty ; qualified_tfvar_exists = StringSet.empty ;
     globally_loaded_modules = StringSet.empty ; modules_loaded_in_modules = Dict.empty ;
-    module_extension_stack = [] ; included_directories = [] ; current_directory = "."
+    module_extension_stack = [] ; included_directories = [] ; current_directory = ".";
+    last_query = None
   }
 ;;
 
@@ -1660,11 +1665,14 @@ let global_module_do m f =
   reflectexn res
 ;;
 
-let global_restore_module_and_dir state' =
+let global_restore_post_file_import state' =
   let state = !globalstate in
   globalstate := { state with current_module = state'.current_module ;
                               module_extension_stack = state'.module_extension_stack ;
-                              current_directory = state'.current_directory }
+                              current_directory = state'.current_directory ;
+                              current_testsuite = state'.current_testsuite ;
+                              last_query = None
+                 }
 ;;
 
 type syntax_type = [ `Makam | `Markdown ] ;;
@@ -1741,7 +1749,7 @@ let global_load_file_resolved ?modul
 
     let original_state = !globalstate in
     let res = reifyexn (fun () -> doit (fun () -> List.iter (fun f -> f ()) res)) in
-    global_restore_module_and_dir original_state ;
+    global_restore_post_file_import original_state ;
     reflectexn res
 
   end
@@ -1798,6 +1806,17 @@ let global_typecheck_silent eorig  =
       ignore (typeof e))
 ;;
 
+let global_set_testsuite s =
+  globalterm_do (fun () ->
+    let state = !termstate in
+    termstate := { state with current_testsuite = Some s })
+;;
+
+let global_set_last_query q =
+  globalterm_do (fun () ->
+    let state = !termstate in
+    termstate := { state with last_query = q })
+;;
 
 (* ----------------------
    Beta-eta normalization.
