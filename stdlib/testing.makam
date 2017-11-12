@@ -2,7 +2,10 @@ testsuite : type.
 
 testcase : testsuite -> prop.
 
+run_tests : testsuite -> prop.
 run_tests : list testsuite -> prop.
+
+run_tests (X : testsuite) :- run_tests [ X ] .
 
 %extend testing_private.
 
@@ -64,7 +67,3 @@ run_tests Suites <-
   [ "\n\n=== RUNNING TESTS (test suites: ", SuitesStr, ")\n" ] Str,
   print_string Str,
   once(demand.aux_demand (testing_private.run_test Suites [] []) (testcase X)).
-
-
-run_tests : testsuite -> prop.
-run_tests X :- run_tests [ X ] .
