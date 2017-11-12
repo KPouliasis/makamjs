@@ -282,6 +282,8 @@ let string_of_name (n : name) : string =
 let termstate = ref (empty_state ()) ;;
 let termenv   = ref (empty_env   ()) ;;
 
+(* TODO: this needs to take into account the presence of the same name in
+   other prefixes *)
 let dequalifyName (fully_qualified_name: string) =
   let state = !termstate in
   let possible_prefixes = state.current_module :: state.module_extension_stack in
