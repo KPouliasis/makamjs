@@ -51,6 +51,21 @@ let mkTmConst spanFrom v =
 ;;
 let mkLamO ?(loc = None) (s,t) = mkLamO ~loc:loc s t ;;
 
+let mkList nilspan es =
+  List.fold_left
+    (fun cur elm -> mkTm "cons" [ elm ; cur ])
+    (mkTmConst nilspan "nil")
+    (List.rev es)
+;;
+
+let mkTuple l =
+  let (hd :: tl) = List.rev l in
+  List.fold_left
+    (fun cur elm -> mkTm "tuple" [ elm ; cur ])
+    hd
+    tl
+;;
+
 let makam_toplevel_parser : (syntax_type -> (unit -> unit) list Peg.parser_t) ref = ref (fun _ _ _ _ -> None) ;;
 let last_command_span : UChannel.span ref = ref None ;;
 
@@ -61,7 +76,7 @@ exception Forget of string ;;
 exception NoTestSuite;;
 exception NoQueryToTest;;
 
-let query_test premises =
+let query_test startspan endspan premises =
   let testsuite =
     if Option.is_none (!globalstate).current_testsuite then
       raise NoTestSuite
@@ -69,10 +84,12 @@ let query_test premises =
       Option.get (!globalstate).current_testsuite
   in
   let premise =
-    Utils.ExtList.foldnonempty (fun q1 q2 -> mkTm "and" [ q1 ; q2 ]) (mkTm "success" [])
+    Utils.ExtList.foldnonempty
+    (fun q1 q2 -> mkTm "and" [ q1 ; q2 ])
+    (mkTmConst endspan "success")
     (fun x -> x) premises
   in
-  mkTm "clause" [ mkTm "testcase" [ mkTm testsuite [] ]; premise ]
+  mkTm "clause" [ mkTm "testcase" [ mkTmConst startspan testsuite ]; premise ]
 ;;
 >>
 
@@ -116,18 +133,11 @@ baseexpr -> id:ltoken(qualident)   << autospan_un mkVar id >>
 
           (* lists *)
           / token("[") es:repSEP(lexpr, ",") nilspan:ltoken("]")
-            << List.fold_left
-               (fun cur elm -> mkTm "cons" [ elm ; cur ])
-               (mkTmConst nilspan "nil")
-               (List.rev es) >>
+            << mkList nilspan es >>
 
           (* tuples *)
           / token("(") hd:lexpr^ token(",") es:repplusSEP(lexpr, ",") token(")")
-            << let (hd :: tl) = List.rev (hd::es) in
-               List.fold_left
-               (fun cur elm -> mkTm "tuple" [ elm ; cur ])
-               hd
-               tl >>
+            << mkTuple (hd :: es) >>
 
           / i:ltoken(num)                       << autospan_un mkInt i >>
           / token("{prop|") p:prop token("|}")  << p >>
@@ -259,6 +269,7 @@ prologcmd1 ->
                           else
                              (Benchmark.cumulative "total staged commands"
                                 (lazy(Termlangrefl.global_staged_command p.content)))) >>
+
            / p:hyp token("?") << fun () -> (global_set_last_query (Some p);
                                             if !_ONLY_TYPECHECK then
                                              (Benchmark.cumulative "total queries"
@@ -266,6 +277,8 @@ prologcmd1 ->
                                            else
                                              (Benchmark.cumulative "total queries"
                                               (lazy(Termlangprolog.global_query p.content)))) >>
+           / p:quoteline(hyp) token("?") << fun () -> global_set_last_query (Some p) >>
+
            / t:querytest
              << fun () -> ((if Option.is_none (!globalstate).last_query then raise NoQueryToTest);
                            let query = Option.get (!globalstate).last_query in
@@ -354,7 +367,6 @@ literate   -> c:rep(literate_line) << List.flatten c >>
 literate_line -> "```makam\n" c:rep(literate_cmd) repV(white) at_start("```\n") << c >>
                / !"```makam\n" to_EOL << [] >>
 literate_cmd -> c:cmdflushed repV(white) << c >>
-              / ">>" to_EOL << fun () -> () >>
 at_start(p) -> &&( epsilon << fun _ -> let open UChannel in (loc _input).charno == 1 >> )
                c:p << c >>
 
@@ -365,14 +377,25 @@ at_start(p) -> &&( epsilon << fun _ -> let open UChannel in (loc _input).charno 
 
 quoteline(p) -> at_start(">> ") res:p << res >>
 
-(* TODO: fix spans *)
-querytest -> quoteline("Yes.") to_EOL << fun query -> query_test [ query ] >>
-           / quoteline("Impossible.") to_EOL << fun query -> query_test [ mkTm "not" [ query ] ] >>
-           / quoteline("Yes:") to_EOL results:repplus(quoteline(var_assignment))
-              << fun query -> query_test (query :: results) >>
+querytest -> start:loced(quoteline("Yes.")) stop:loced(epsilon) to_EOL
+             << fun query -> query_test start stop [ mkTm "once" [ query ] ] >>
 
-(* TODO: lexpr should not allow line breaks (or there should be a terminating character *)
-var_assignment -> x:ltoken(ident) token(":=") e:lexpr token(("," / ".")) << mkTm "unif_alpha_eqv" [ autospan_un mkVar x; e ] >>
+           / start:loced(quoteline("Impossible.")) stop:loced(epsilon) to_EOL
+             << fun query -> query_test start stop [ mkTm "not" [ query ] ] >>
+
+           / start:loced(quoteline("Yes:")) to_EOL
+             varsvals:repplus(quoteline(var_assignment))
+             stop:loced(epsilon)
+              << fun query ->
+                 let (vars, vals) = List.split varsvals in
+                 let vars' = mkTuple vars in
+                 let vals' = mkTuple vals in
+                 query_test start stop
+                            [ mkTm "once" [ query ];
+                              mkTm "unif_alpha_eqv" [ vars'; vals' ] ] >>
+
+var_assignment -> x:ltoken(ident) token(":=") e:lexpr token(("," / ".")) to_EOL
+                  << (autospan_un mkVar x, e) >>
 
 (* -------------------------------------- *)
 (* Dynamic binding trees parsing          *)
