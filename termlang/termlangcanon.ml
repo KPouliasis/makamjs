@@ -1638,7 +1638,7 @@ let global_define s typ =
 ;;
 
 let global_term_reset () =
-  globalstate := !builtinstate
+  globalstate := { !builtinstate with current_testsuite = (!globalstate).current_testsuite }
 ;;
 
 
