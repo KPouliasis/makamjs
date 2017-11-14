@@ -319,33 +319,3 @@ vdash_I (lam (box (arrow a b)) (fun f =>
 ```
 
 
-Some extra stuff:
-
-```
-inot : iterm.
-vdash_I inot (arrow ibool ibool).
-```
-
-
-```makam
-eval : iterm -> iterm -> prop.
-
-value : iterm -> prop.
-
-value (lam F).
-value (btrue).
-value (bfalse).
-
-eval V V when value V.
-
-eval (app E1 E2) V :-
-  eval E1 (lam F),
-  eval E2 V2,
-  eq (F V2) V.
-
-eval (ifthenelse (btrue) ET EF) V :-
-  eval ET V.
-
-eval (ifthenelse (bfalse) ET EF) V :-
-  eval EF V.
-```
